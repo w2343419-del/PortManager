@@ -2,7 +2,6 @@ package util
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -54,7 +53,7 @@ func Load() error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		cfg = DefaultConfig()
 		return nil
@@ -73,7 +72,7 @@ func Save() error {
 		return err
 	}
 
-	return ioutil.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0644)
 }
 
 func Get() *Config {

@@ -14,6 +14,8 @@ func main() {
 
 	// 创建并运行应用
 	app := ui.NewApp()
-	app.Run()
+	if err := app.Run(); err != nil {
+		log.Fatalf("应用启动失败: %v\n", err)
+	}
 }
 
