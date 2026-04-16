@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"portmanager/internal/core"
 	"portmanager/internal/util"
 	"strings"
@@ -28,6 +29,7 @@ type App struct {
 
 	mw           *walk.MainWindow
 	notifyIcon   *walk.NotifyIcon
+	appIcon      *walk.Icon
 	titleLabel   *walk.Label
 	statusLabel  *walk.Label
 	countLabel   *walk.Label
@@ -58,6 +60,7 @@ func (a *App) Run() error {
 	window := MainWindow{
 		AssignTo: &a.mw,
 		Title:    "PortManager",
+		Icon:     "PortManager.ico",
 		Font:     Font{Family: bodyFontFamily, PointSize: 10},
 		OnSizeChanged: func() {
 			a.handleWindowSizeChanged(cardWidth, cardHeight)
@@ -186,6 +189,12 @@ func (a *App) Run() error {
 		return err
 	}
 
+	// Ensure both window icon and tray icon use the same app icon.
+	a.loadAppIcon()
+	if a.appIcon != nil {
+		_ = a.mw.SetIcon(a.appIcon)
+	}
+
 	if err := a.initTray(); err != nil {
 		return err
 	}
@@ -208,6 +217,10 @@ func (a *App) Run() error {
 	_ = a.positionBottomRight()
 	a.mw.Run()
 	a.disposeTray()
+	if a.appIcon != nil {
+		a.appIcon.Dispose()
+		a.appIcon = nil
+	}
 
 	return nil
 }
@@ -225,10 +238,8 @@ func (a *App) initTray() error {
 	a.notifyIcon = ni
 	_ = ni.SetToolTip("PortManager")
 
-	if exePath, e := os.Executable(); e == nil {
-		if icon, ie := walk.NewIconFromFile(exePath); ie == nil {
-			_ = ni.SetIcon(icon)
-		}
+	if a.appIcon != nil {
+		_ = ni.SetIcon(a.appIcon)
 	}
 
 	openAction := walk.NewAction()
@@ -289,6 +300,27 @@ func (a *App) disposeTray() {
 	if a.notifyIcon != nil {
 		_ = a.notifyIcon.Dispose()
 		a.notifyIcon = nil
+	}
+}
+
+func (a *App) loadAppIcon() {
+	if a.appIcon != nil {
+		return
+	}
+
+	var candidates []string
+	if exePath, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exePath), "PortManager.ico"))
+		candidates = append(candidates, exePath)
+	}
+	candidates = append(candidates, "PortManager.ico")
+
+	for _, path := range candidates {
+		icon, err := walk.NewIconFromFile(path)
+		if err == nil {
+			a.appIcon = icon
+			return
+		}
 	}
 }
 
