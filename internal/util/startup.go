@@ -15,6 +15,7 @@ func GetStartupPath() string {
 // IsAutoStartupEnabled 检查开机自启动是否启用
 func IsAutoStartupEnabled() bool {
 	cmd := exec.Command("reg", "query", GetStartupPath(), "/v", "PortManager")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	err := cmd.Run()
 	return err == nil
 }
@@ -29,7 +30,7 @@ func EnableAutoStartup() error {
 	// 使用 reg add 命令添加到注册表
 	cmd := exec.Command("reg", "add", GetStartupPath(), "/v", "PortManager", "/t", "REG_SZ", "/d", exePath, "/f")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to enable auto-startup: %v", err)
 	}
@@ -41,7 +42,7 @@ func EnableAutoStartup() error {
 func DisableAutoStartup() error {
 	cmd := exec.Command("reg", "delete", GetStartupPath(), "/v", "PortManager", "/f")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to disable auto-startup: %v", err)
 	}

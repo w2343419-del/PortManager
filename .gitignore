@@ -1,7 +1,20 @@
-PortManager.exe
+# binaries
 *.exe
+*.dll
+*.so
+
+# local runtime artifacts
 *.log
 *.tmp
+*.pid
+
+# backup/temp files
+*.exe~
+*.bak
+*.old
+*.orig
+
+# env/build dirs
 .env
 dist/
 bin/

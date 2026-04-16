@@ -18,4 +18,3 @@ func main() {
 		log.Fatalf("应用启动失败: %v\n", err)
 	}
 }
-

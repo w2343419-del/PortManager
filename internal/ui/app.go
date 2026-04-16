@@ -3,22 +3,30 @@ package ui
 import (
 	"fmt"
 	"log"
+	"os/exec"
 	"portmanager/internal/core"
 	"portmanager/internal/util"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
+	"unsafe"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 )
 
 type App struct {
 	monitor *core.PortMonitor
 
-	mu       sync.Mutex
-	scanning bool
+	mu           sync.Mutex
+	scanning     bool
+	wasMinimized bool
+	fixingBounds bool
 
 	mw           *walk.MainWindow
+	titleLabel   *walk.Label
 	statusLabel  *walk.Label
 	countLabel   *walk.Label
 	results      *walk.ListBox
@@ -33,80 +41,133 @@ func NewApp() *App {
 }
 
 func (a *App) Run() error {
+	const cardWidth = 420
+	const cardHeight = 500
+	bodyFontFamily := chooseBodyFontFamily()
+	headingFontFamily := chooseHeadingFontFamily()
+
 	window := MainWindow{
 		AssignTo: &a.mw,
 		Title:    "PortManager",
-		MinSize:  Size{Width: 1220, Height: 780},
-		Layout:   VBox{MarginsZero: false, SpacingZero: false},
+		Font:     Font{Family: bodyFontFamily, PointSize: 10},
+		OnSizeChanged: func() {
+			a.handleWindowSizeChanged(cardWidth, cardHeight)
+		},
+		Size:       Size{Width: cardWidth, Height: cardHeight},
+		MinSize:    Size{Width: cardWidth, Height: cardHeight},
+		MaxSize:    Size{Width: cardWidth, Height: cardHeight},
+		Visible:    false,
+		Background: SolidColorBrush{Color: walk.RGB(245, 244, 237)},
+		Layout:     VBox{Margins: Margins{Left: 12, Top: 10, Right: 12, Bottom: 10}, Spacing: 8},
 		Children: []Widget{
 			Composite{
-				Layout: Grid{Columns: 1},
+				Background: SolidColorBrush{Color: walk.RGB(250, 249, 245)},
+				Layout:     HBox{Margins: Margins{Left: 12, Top: 10, Right: 12, Bottom: 10}},
 				Children: []Widget{
-					Label{Text: "PortManager", Font: Font{Bold: true, PointSize: 18}},
-					Label{Text: "端口检测管理工具"},
+					Label{AssignTo: &a.titleLabel, Text: "PortManager", Font: Font{Family: headingFontFamily, PointSize: 16}, TextColor: walk.RGB(20, 20, 19)},
+					HSpacer{},
+					Label{Text: "", Font: Font{Family: bodyFontFamily, PointSize: 9}, TextColor: walk.RGB(94, 93, 89)},
 				},
 			},
 			Composite{
-				Layout: HBox{},
+				Background: SolidColorBrush{Color: walk.RGB(250, 249, 245)},
+				Layout:     VBox{Margins: Margins{Left: 12, Top: 8, Right: 12, Bottom: 8}, Spacing: 6},
 				Children: []Widget{
-					GroupBox{
-						Title:  "🔍 端口扫描",
-						Layout: VBox{},
+					Label{Text: "扫描", Font: Font{Family: headingFontFamily, PointSize: 12}, TextColor: walk.RGB(20, 20, 19)},
+					Composite{
+						Layout: HBox{},
 						Children: []Widget{
-							Composite{
-								Layout: HBox{},
-								Children: []Widget{
-									PushButton{
-										Text: "快速扫描",
-										OnClicked: func() {
-											go a.scanPorts(core.ScanModeQuick)
-										},
-									},
-									PushButton{
-										Text: "全面扫描",
-										OnClicked: func() {
-											go a.scanPorts(core.ScanModeFull)
-										},
-									},
+							PushButton{
+								Text:    "快速扫描",
+								Font:    Font{Family: bodyFontFamily, PointSize: 10},
+								MinSize: Size{Width: 118, Height: 34},
+								OnClicked: func() {
+									go a.scanPorts(core.ScanModeQuick)
 								},
 							},
-							Label{AssignTo: &a.statusLabel, Text: "准备就绪"},
-							Label{Text: "快速扫描: 常用/高风险端口 | 全面扫描: 全部监听端口"},
-						},
-					},
-					GroupBox{
-						Title:  "📊 扫描结果",
-						Layout: VBox{},
-						Children: []Widget{
-							Label{Text: "发现端口数", Font: Font{Bold: true}},
-							Label{AssignTo: &a.countLabel, Text: "0", Font: Font{Bold: true, PointSize: 18}},
-							ListBox{AssignTo: &a.results, Model: []string{}, StretchFactor: 1},
 							PushButton{
-								Text: "关闭选中端口",
+								Text:    "全面扫描",
+								Font:    Font{Family: bodyFontFamily, PointSize: 10},
+								MinSize: Size{Width: 118, Height: 34},
+								OnClicked: func() {
+									go a.scanPorts(core.ScanModeFull)
+								},
+							},
+							PushButton{
+								Text:    "关闭端口",
+								Font:    Font{Family: bodyFontFamily, PointSize: 10},
+								MinSize: Size{Width: 118, Height: 34},
 								OnClicked: func() {
 									a.closeSelectedPort()
 								},
 							},
 						},
 					},
-					GroupBox{
-						Title:  "⚙️ 设置",
-						Layout: VBox{},
+					Label{AssignTo: &a.statusLabel, Text: "准备就绪", Font: Font{Family: bodyFontFamily, PointSize: 10}, TextColor: walk.RGB(77, 76, 72)},
+				},
+			},
+			Composite{
+				Background:    SolidColorBrush{Color: walk.RGB(250, 249, 245)},
+				Layout:        VBox{Margins: Margins{Left: 12, Top: 8, Right: 12, Bottom: 8}, Spacing: 6},
+				StretchFactor: 1,
+				Children: []Widget{
+					Composite{
+						Layout: HBox{},
+						Children: []Widget{
+							Label{Text: "扫描结果", Font: Font{Family: headingFontFamily, PointSize: 12}, TextColor: walk.RGB(20, 20, 19)},
+							HSpacer{},
+							Label{AssignTo: &a.countLabel, Text: "0", Font: Font{Family: headingFontFamily, PointSize: 14}, TextColor: walk.RGB(20, 20, 19)},
+						},
+					},
+					ListBox{
+						AssignTo:      &a.results,
+						Font:          Font{Family: bodyFontFamily, PointSize: 10},
+						MinSize:       Size{Height: 170},
+						Model:         []string{},
+						StretchFactor: 1,
+						ContextMenuItems: []MenuItem{
+							Action{Text: "查看端口信息与建议", OnTriggered: func() { a.showSelectedPortInsight() }},
+						},
+					},
+					Label{Text: "提示: 选择条目后可一键关闭对应端口", Font: Font{Family: bodyFontFamily, PointSize: 9}, TextColor: walk.RGB(94, 93, 89)},
+				},
+			},
+			Composite{
+				Background: SolidColorBrush{Color: walk.RGB(250, 249, 245)},
+				Layout:     VBox{Margins: Margins{Left: 12, Top: 8, Right: 12, Bottom: 8}, Spacing: 6},
+				Children: []Widget{
+					Label{Text: "设置", Font: Font{Family: headingFontFamily, PointSize: 12}, TextColor: walk.RGB(20, 20, 19)},
+					Composite{
+						Layout: HBox{},
 						Children: []Widget{
 							CheckBox{
 								AssignTo: &a.startupCheck,
 								Text:     "开机自启动",
+								Font:     Font{Family: bodyFontFamily, PointSize: 10},
 								Checked:  util.IsAutoStartupEnabled(),
 								OnCheckedChanged: func() {
 									go a.toggleStartup(a.startupCheck.Checked())
 								},
 							},
+							HSpacer{},
+							PushButton{Text: "关于", Font: Font{Family: bodyFontFamily, PointSize: 10}, MinSize: Size{Width: 74, Height: 30}, OnClicked: func() { a.showAbout() }},
 							PushButton{
-								Text: "关于",
+								Text:    "退出",
+								Font:    Font{Family: bodyFontFamily, PointSize: 10},
+								MinSize: Size{Width: 74, Height: 30},
 								OnClicked: func() {
-									a.showAbout()
+									if a.confirmExit() {
+										a.mw.Close()
+									}
 								},
 							},
+						},
+					},
+					Composite{
+						Layout: HBox{},
+						Children: []Widget{
+							PushButton{Text: "刷新", Font: Font{Family: bodyFontFamily, PointSize: 10}, MinSize: Size{Width: 74, Height: 30}, OnClicked: func() { go a.scanPorts(core.ScanModeQuick) }},
+							HSpacer{},
 						},
 					},
 				},
@@ -114,14 +175,177 @@ func (a *App) Run() error {
 		},
 	}
 
-	if _, err := window.Run(); err != nil {
+	if err := window.Create(); err != nil {
 		return err
 	}
+
+	if err := a.positionBottomRight(); err != nil {
+		return err
+	}
+
+	a.mw.Show()
+	// Re-align once after show so final non-client size and DPI scaling are reflected.
+	_ = a.positionBottomRight()
+	a.mw.Run()
 
 	return nil
 }
 
+func (a *App) handleWindowSizeChanged(targetWidth, targetHeight int) {
+	if a.mw == nil || a.fixingBounds {
+		return
+	}
+
+	if win.IsIconic(a.mw.Handle()) {
+		a.wasMinimized = true
+		return
+	}
+
+	if !a.wasMinimized {
+		return
+	}
+
+	a.wasMinimized = false
+	a.fixingBounds = true
+	defer func() {
+		a.fixingBounds = false
+	}()
+
+	b := a.mw.BoundsPixels()
+	if b.Width != targetWidth || b.Height != targetHeight {
+		_ = a.mw.SetBoundsPixels(walk.Rectangle{X: b.X, Y: b.Y, Width: targetWidth, Height: targetHeight})
+	}
+
+	_ = a.positionBottomRight()
+}
+
+func (a *App) positionBottomRight() error {
+	if a.mw == nil {
+		return nil
+	}
+
+	bounds := a.mw.BoundsPixels()
+	width := bounds.Width
+	height := bounds.Height
+	if width <= 0 || height <= 0 {
+		s := a.mw.SizePixels()
+		width = s.Width
+		height = s.Height
+	}
+
+	workArea := win.RECT{
+		Left:   0,
+		Top:    0,
+		Right:  win.GetSystemMetrics(win.SM_CXSCREEN),
+		Bottom: win.GetSystemMetrics(win.SM_CYSCREEN),
+	}
+
+	monitor := win.MonitorFromWindow(a.mw.Handle(), win.MONITOR_DEFAULTTONEAREST)
+	if monitor != 0 {
+		mi := win.MONITORINFO{CbSize: uint32(unsafe.Sizeof(win.MONITORINFO{}))}
+		if win.GetMonitorInfo(monitor, &mi) {
+			workArea = mi.RcWork
+		}
+	}
+
+	margin := 14
+	x := int(workArea.Right) - width - margin
+	y := int(workArea.Bottom) - height - margin
+	if x < int(workArea.Left) {
+		x = int(workArea.Left)
+	}
+	if y < int(workArea.Top) {
+		y = int(workArea.Top)
+	}
+
+	return a.mw.SetBoundsPixels(walk.Rectangle{X: x, Y: y, Width: width, Height: height})
+}
+
+func chooseBodyFontFamily() string {
+	preferred := []string{
+		"Microsoft YaHei UI",
+		"Segoe UI",
+		"Segoe UI Variable Text",
+		"Inter",
+	}
+
+	installed := readInstalledFontNames()
+	for _, family := range preferred {
+		if fontNameExists(installed, family) {
+			return family
+		}
+	}
+
+	return "Segoe UI"
+}
+
+func chooseHeadingFontFamily() string {
+	preferred := []string{
+		"Anthropic Serif",
+		"Georgia",
+		"Times New Roman",
+	}
+
+	installed := readInstalledFontNames()
+	for _, family := range preferred {
+		if fontNameExists(installed, family) {
+			return family
+		}
+	}
+
+	return "Georgia"
+}
+
+func readInstalledFontNames() []string {
+	keys := []string{
+		`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts`,
+		`HKCU\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts`,
+	}
+	result := make([]string, 0, 512)
+
+	for _, key := range keys {
+		cmd := exec.Command("reg", "query", key)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		for _, line := range strings.Split(strings.ReplaceAll(string(output), "\r", ""), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(strings.ToUpper(line), "HKEY_") {
+				continue
+			}
+
+			parts := strings.SplitN(line, "REG_", 2)
+			if len(parts) == 0 {
+				continue
+			}
+
+			name := strings.TrimSpace(parts[0])
+			if name != "" {
+				result = append(result, name)
+			}
+		}
+	}
+
+	return result
+}
+
+func fontNameExists(installed []string, family string) bool {
+	f := strings.ToLower(family)
+	for _, n := range installed {
+		if strings.Contains(strings.ToLower(n), f) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (a *App) scanPorts(mode core.ScanMode) {
+	startAt := time.Now()
+
 	a.mu.Lock()
 	if a.scanning {
 		a.mu.Unlock()
@@ -154,7 +378,7 @@ func (a *App) scanPorts(mode core.ScanMode) {
 
 	a.runOnUI(func() {
 		a.refreshResults(ports)
-		a.statusLabel.SetText(fmt.Sprintf("%s完成，发现 %d 个开放端口", modeLabel, len(ports)))
+		a.statusLabel.SetText(fmt.Sprintf("%s完成，发现 %d 个开放端口，耗时 %d ms", modeLabel, len(ports), time.Since(startAt).Milliseconds()))
 	})
 
 	a.finishScan()
@@ -193,6 +417,45 @@ func (a *App) closeSelectedPort() {
 
 	port := a.portItems[index].Port
 	go a.closePort(port)
+}
+
+func (a *App) showSelectedPortInsight() {
+	if a.results == nil {
+		return
+	}
+
+	index := a.results.CurrentIndex()
+	if index < 0 || index >= len(a.portItems) {
+		walk.MsgBox(a.mw, "提示", "请先选中一个端口", walk.MsgBoxIconInformation)
+		return
+	}
+
+	port := a.portItems[index]
+	insight, err := core.BuildPortInsight(port)
+	if err != nil {
+		walk.MsgBox(a.mw, "端口分析失败", err.Error(), walk.MsgBoxIconError)
+		return
+	}
+
+	lines := []string{
+		fmt.Sprintf("端口: %d", insight.Port),
+		fmt.Sprintf("协议: %s", insight.Protocol),
+		fmt.Sprintf("进程: %s", insight.Process),
+		fmt.Sprintf("PID: %d", insight.PID),
+		"",
+		fmt.Sprintf("用途: %s", insight.Usage),
+		fmt.Sprintf("流量评估: %s（活跃连接 %d）", insight.TrafficLevel, insight.ActiveConnections),
+		"",
+		fmt.Sprintf("推荐: %s", insight.Recommendation),
+		fmt.Sprintf("依据: %s", insight.Reason),
+	}
+
+	icon := walk.MsgBoxIconInformation
+	if insight.Recommendation == "建议关闭" {
+		icon = walk.MsgBoxIconWarning
+	}
+
+	walk.MsgBox(a.mw, fmt.Sprintf("端口 %d 分析", insight.Port), strings.Join(lines, "\n"), icon)
 }
 
 func (a *App) closePort(port int) {
@@ -261,6 +524,10 @@ func (a *App) showAbout() {
 		"",
 		"当前版本：v1.0.0",
 	}, "\n"), walk.MsgBoxIconInformation)
+}
+
+func (a *App) confirmExit() bool {
+	return walk.MsgBox(a.mw, "退出确认", "确定要退出 PortManager 吗？", walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == walk.DlgCmdYes
 }
 
 func (a *App) finishScan() {
