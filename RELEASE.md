@@ -1,41 +1,72 @@
-# Release v1.0.0
+# Release v1.1.0
 
-## Highlights
+发布日期：2026-04-16
 
-- Modern card-based GUI inspired by G-Helper
-- Local port scanning and process display
-- One-click port closing for non-system processes
-- Windows auto-startup support
-- Pure Go standard library implementation
-- Native desktop window with card-based layout
+## 版本概览
 
-## Included Files
+本版本聚焦在三个方向：
 
-- PortManager.exe - Main executable
-- run.bat - Admin launch helper
-- README.md - Project overview
-- USAGE.md - End-user guide
-- LICENSE - MIT license text
+- 稳定性：修复启动闪退与最小化恢复后窗体尺寸/位置漂移问题
+- 体验：卡片式桌面 UI 继续优化，支持右下角固定停靠
+- 可用性：新增右键端口洞察（用途、流量指标、建议动作）
 
-## Notes
+## 主要更新
 
-- Built for Windows 10 and later
-- Administrative privileges are required for some actions
-- The app opens as a native Windows desktop window
+### 1) 端口管理与分析增强
 
-## Suggested GitHub Release Description
+- 新增结果列表右键菜单：查看端口信息与建议
+- 端口洞察弹窗包含：
+	- 端口/协议/进程/PID
+	- 常见用途说明
+	- 活跃连接数（作为流量指标）
+	- 智能建议：建议关闭 / 建议开启 / 无需操作
+- 建议逻辑会结合端口风险级别、当前连接活跃度、进程属性动态评估
 
-Use this text when creating the GitHub release:
+### 2) 扫描性能与资源占用优化
 
-```text
-PortManager v1.0.0 is now available.
+- 扫描流程从逐 PID 查询改为批量查询进程信息
+- 减少命令调用次数，降低扫描阶段 CPU/IO 压力
+- 继续保留隐藏命令窗口策略，扫描过程中不弹黑框
 
-This release includes a modern card-based desktop interface, local port detection, process inspection, port closing actions, and Windows auto-startup support. The application is built with Go and launches as a native desktop window.
+### 3) 桌面小卡片 UI 持续打磨
 
-Files:
+- 小卡片窗体布局优化：更紧凑、信息更聚焦
+- 字体策略升级：中文清晰优先，兼容 Claude 风格字体回退
+- 端口列表区域可见性与可读性提升
+
+### 4) 窗体行为修复
+
+- 启动定位改为像素级定位，避免 DPI 缩放导致底部被截断
+- 最小化恢复后自动纠正：
+	- 恢复固定尺寸
+	- 重新吸附到右下角
+
+## 兼容性与运行要求
+
+- 平台：Windows 10/11
+- 权限：建议管理员权限运行（关闭端口、部分进程信息读取依赖权限）
+- 构建：Go 1.25.5
+
+## 发行建议文件
+
 - PortManager.exe
 - run.bat
+- run.vbs
 - README.md
-- USAGE.md
+- RELEASE.md
 - LICENSE
+
+## GitHub Release 文案（可直接使用）
+
+```text
+PortManager v1.1.0
+
+本次更新重点提升了稳定性、扫描性能与端口分析能力：
+
+1) 新增右键端口洞察：可查看端口用途、活跃连接、处理建议（建议关闭/建议开启/无需操作）。
+2) 扫描优化：改为批量进程信息查询，降低资源占用并提升扫描效率。
+3) 窗体修复：解决 DPI 缩放下底部裁切，以及最小化恢复后窗体尺寸/位置变化的问题。
+4) 界面优化：小卡片布局更紧凑，字体显示更清晰。
+
+建议以管理员权限运行以获得完整功能。
 ```
