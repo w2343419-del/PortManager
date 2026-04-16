@@ -8,7 +8,6 @@ import (
 var (
 	kernel32         = syscall.NewLazyDLL("kernel32.dll")
 	createMutexW     = kernel32.NewProc("CreateMutexW")
-	openMutexW       = kernel32.NewProc("OpenMutexW")
 	releaseMutex     = kernel32.NewProc("ReleaseMutex")
 	closeSemaphore   = kernel32.NewProc("CloseHandle")
 	findWindowW      = syscall.NewLazyDLL("user32.dll").NewProc("FindWindowW")
@@ -27,34 +26,41 @@ var singleInstanceMutex uintptr
 func CheckSingleInstance(mutexName string, windowClass string) bool {
 	// 尝试创建互斥体
 	mutexNameUTF16, _ := syscall.UTF16PtrFromString(mutexName)
-	
-	ret, _, _ := createMutexW.Call(
-		0,  // bInitialOwner = false
-		1,  // lpMutexAttributes = NULL (safe default)
+
+	ret, _, callErr := createMutexW.Call(
+		0, // lpMutexAttributes = NULL
+		0, // bInitialOwner = FALSE
 		uintptr(unsafe.Pointer(mutexNameUTF16)),
 	)
-	
+
 	if ret == 0 {
-		return true // 创建失败，可能已有实例
+		// 访问被拒绝通常意味着同名互斥体已存在（不同权限级别下常见），
+		// 这里按“已有实例”处理，避免继续启动第二个实例。
+		if errno, ok := callErr.(syscall.Errno); ok && errno == syscall.ERROR_ACCESS_DENIED {
+			if windowClass != "" {
+				activateExistingWindow(windowClass)
+			}
+			return true
+		}
+		return true
 	}
-	
+
 	singleInstanceMutex = ret
-	
-	// 检查互斥体的最后一个错误
-	// ERROR_ALREADY_EXISTS 错误代码是 183
-	lastErr := syscall.GetLastError()
-	if lastErr == syscall.Errno(183) {
+
+	// 通过CreateMutexW的返回错误判断是否已存在，避免GetLastError不稳定问题。
+	if errno, ok := callErr.(syscall.Errno); ok && errno == syscall.ERROR_ALREADY_EXISTS {
 		// 互斥体已存在，说明有实例在运行
 		// 尝试激活现有窗口
 		if windowClass != "" {
 			activateExistingWindow(windowClass)
 		}
-		
+
 		// 关闭互斥体句柄
 		closeSemaphore.Call(ret)
+		singleInstanceMutex = 0
 		return true
 	}
-	
+
 	return false
 }
 

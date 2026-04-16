@@ -9,7 +9,7 @@ import (
 func main() {
 	// 检查单实例
 	// 如果已有实例在运行，激活现有窗口然后退出
-	if util.CheckSingleInstance("PortManager_SingleInstance_Mutex", "WALK_MAINWINDOW_CLASS_NAME") {
+	if util.CheckSingleInstance("Global\\PortManager_SingleInstance_Mutex", "WALK_MAINWINDOW_CLASS_NAME") {
 		return
 	}
 	defer util.ReleaseSingleInstance()
